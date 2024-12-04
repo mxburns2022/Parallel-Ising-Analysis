@@ -147,8 +147,9 @@ def to_numeric(val: str):
 def read_ising(path: str, scale: float):
     with open(path) as infile:
         if '.ising' in path:
-            nodes, edges, nlin = map(int, infile.readline().strip().split())
-            const = float(infile.readline())
+            nodes, nlin, edges = map(int, infile.readline().strip().split())
+            # const = float(infile.readline())
+            const=0
             offset = 0
         else:
             offset = 0 if '.gset' in path else 1
@@ -164,10 +165,12 @@ def read_ising(path: str, scale: float):
         for i in range(edges):
             args = infile.readline().strip().split()
             u, v, val = map(to_numeric, args)
-            J[u-offset][v-offset] = val
-            J[v-offset][u-offset] = val
+            J[u-offset][v-offset] = -val
+            J[v-offset][u-offset] = -val
         h /= scale
         J /= scale
+        h /= J.abs().max()
+        J /= J.abs().max()
         return h, J, const
         
 def energy(x: torch.Tensor, 
@@ -200,48 +203,54 @@ if __name__ == '__main__':
     args.scale 
     logfile = 'epoch_log.csv'
     with open(logfile, 'w') as log:
-        log.write(f'beta0,beta1,mean_gs,std_gs\n')
-        log.flush()
-        for size in [250, 500]:
-            for epoch in tqdm(np.logspace(-10, -7, 20)):
-                x, samples, mean_gs, std_gs = simulate_concurrent_im(
-                    h=h,
-                    J=J,
-                    beta0=args.beta0,
-                    beta1=args.beta1,
-                    tstop=args.tstop,
-                    replicas=args.replicas,
-                    epoch=epoch,
-                    dt=args.dt,
-                    scale=args.scale,
-                    size=size
-                )
-                log.write(f'{args.beta0},{args.beta1},{args.tstop},{args.replicas},{epoch},{mean_gs},{std_gs}\n')
+        log.write(f'beta0,beta1,tstop,epoch,beta0,beta1,mean_gs,std_gs,spin\n')
+        for beta0 in np.linspace(0.1, 2, 5):
+            for beta1 in np.linspace(5, 20, 5):
                 log.flush()
-        # if args.size >= J.shape[0] or args.blocks > 1:
-        #     x, samples, mean_gs = simulate_full_im(
-        #         h=h,
-        #         J=J,
-        #         beta0=args.beta0,
-        #         beta1=args.beta1,
-        #         tstop=args.tstop,
-        #         replicas=args.replicas,
-        #         epoch=args.epoch,
-        #         dt=args.dt,
-        #         scale=args.scale
-        #     )
-        # else:
-        #     x, samples, mean_gs = simulate_concurrent_im(
-        #         h=h,
-        #         J=J,
-        #         beta0=args.beta0,
-        #         beta1=args.beta1,
-        #         tstop=args.tstop,
-        #         replicas=args.replicas,
-        #         epoch=args.epoch,
-        #         dt=args.dt,
-        #         nblocks=args.blocks,
-        #         size=args.size,
-        #         scale=args.scale
-        #     )
+                # for size in [196//2, 196//4]:
+                #     for epoch in tqdm(np.logspace(-10, -7, 20)):
+                #         x, samples, mean_gs, std_gs = simulate_full_im(
+                #             h=h,
+                #             J=J,
+                #             beta0=args.beta0,
+                #             beta1=args.beta1,
+                #             tstop=args.tstop,
+                #             replicas=args.replicas,
+                #             epoch=epoch,
+                #             dt=args.dt,
+                #             scale=args.scale
+                #             # size=size
+                #         )
+                #         breakpoint()
+                #         log.write(f'{args.beta0},{args.beta1},{args.tstop},{args.replicas},{epoch},{mean_gs},{std_gs}\n')
+                #         log.flush()
+                if args.size >= J.shape[0] or args.blocks > 1:
+                    x, samples, mean_gs, std_gs = simulate_full_im(
+                        h=h,
+                        J=J,
+                        beta0=beta0,
+                        beta1=beta1,
+                        tstop=args.tstop,
+                        replicas=args.replicas,
+                        epoch=args.epoch,
+                        dt=args.dt,
+                        scale=args.scale
+                    )
+                else:
+                    x, samples, mean_gs, std_gs = simulate_concurrent_im(
+                        h=h,
+                        J=J,
+                        beta0=beta0,
+                        beta1=beta1,
+                        tstop=args.tstop,
+                        replicas=args.replicas,
+                        epoch=args.epoch,
+                        dt=args.dt,
+                        nblocks=args.blocks,
+                        size=args.size,
+                        scale=args.scale
+                    )
+                for xi in x.T:
+                    log.write(f'{args.beta0},{args.beta1},{args.tstop},{args.epoch},{beta0},{beta1},{mean_gs},{std_gs},{":".join([str(i.item()) for i in xi.sign()])}\n')
+            #         log.flush()
     pass
