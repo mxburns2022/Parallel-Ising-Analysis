@@ -2,8 +2,10 @@ import torch
 import numpy as np
 import pandas as pd
 import os
+import re
 from argparse import ArgumentParser
 from tqdm import tqdm
+from pathlib import Path
 
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
@@ -60,6 +62,8 @@ def simulate_concurrent_im(J: torch.Tensor,
     enevals = energy(x.sign(), h, J, scale, 0.0)/N
     return x, sampleset, enevals.mean().item(), enevals.std().item()
 
+
+
 def simulate_concurrent_im_sparse(J: torch.Tensor, 
                            h: torch.Tensor, 
                            beta0: float, 
@@ -82,7 +86,7 @@ def simulate_concurrent_im_sparse(J: torch.Tensor,
     x = torch.randn((N, replicas), device=device)
     nsteps = int(np.ceil(tstop / dt))
     sync_steps = int(np.ceil(epoch / dt))
-    beta_steps = np.sqrt(2*dt)*np.sqrt(1/(scale*np.linspace(beta0, beta1, nsteps)))
+    beta_steps = np.sqrt(2*dt)*np.linspace(beta0, beta1, nsteps)
     burn_in_steps = int(np.ceil(burn_in_time / dt))
     sample_steps = nsteps
     if samples > 0:
@@ -119,7 +123,7 @@ def simulate_full_im(J: torch.Tensor,
     N = J.shape[0]
     x = torch.randn((N, replicas), device=device)
     nsteps = int(np.ceil(tstop / dt))
-    beta_steps = np.sqrt(2*dt)*np.sqrt(1/(scale*np.linspace(beta0, beta1, nsteps)))
+    beta_steps = np.sqrt(2*dt)*scale*np.linspace(beta0, beta1, nsteps)
     burn_in_steps = int(np.ceil(burn_in_time / dt))
     sample_steps = nsteps
     if samples > 0:
@@ -169,8 +173,8 @@ def read_ising(path: str, scale: float):
             J[v-offset][u-offset] = -val
         h /= scale
         J /= scale
-        h /= J.abs().max()
-        J /= J.abs().max()
+        # h /= J.abs().max()
+        # J /= J.abs().max()
         return h, J, const
         
 def energy(x: torch.Tensor, 
@@ -183,9 +187,9 @@ def energy(x: torch.Tensor,
 
 
 parser = ArgumentParser()
-parser.add_argument('--graph','-g', help='Path to graph edgelist')
+parser.add_argument('--graph','-g', help='Path to graph edgelist', nargs='+')
 parser.add_argument('--size','-s', type=int, help='Ising machine size (Default will assume problem size)', default=None)
-parser.add_argument('--blocks','-b', type=int, help='Number of blocks to optimize (Default will assume problem size). NOTE: Do not specify both --size and --blocks', default=None)
+parser.add_argument('--blocks','-b', type=int, help='Number of blocks to optimize (Default will assume problem size). NOTE: Do not specify both --size and --blocks', default=None, nargs='+')
 parser.add_argument('--tstop','-t', type=float, help='Total (unitless) simulation time', default=100)
 parser.add_argument('--dt', type=float, help='(Unitless) time step', default=1e-3)
 parser.add_argument('--samples', type=int, help='Number of samples to collect', default=0)
@@ -198,59 +202,61 @@ parser.add_argument('--beta1', type=float, help='Ending inverse temperature', de
 
 if __name__ == '__main__':
     args = parser.parse_args()
-    h, J, const = read_ising(args.graph, args.scale)
-    # print(J.mean(), J.)
-    args.scale 
-    logfile = 'epoch_log.csv'
-    with open(logfile, 'w') as log:
-        log.write(f'beta0,beta1,tstop,epoch,beta0,beta1,mean_gs,std_gs,spin\n')
-        for beta0 in np.linspace(0.1, 2, 5):
-            for beta1 in np.linspace(5, 20, 5):
-                log.flush()
-                # for size in [196//2, 196//4]:
-                #     for epoch in tqdm(np.logspace(-10, -7, 20)):
-                #         x, samples, mean_gs, std_gs = simulate_full_im(
-                #             h=h,
-                #             J=J,
-                #             beta0=args.beta0,
-                #             beta1=args.beta1,
-                #             tstop=args.tstop,
-                #             replicas=args.replicas,
-                #             epoch=epoch,
-                #             dt=args.dt,
-                #             scale=args.scale
-                #             # size=size
-                #         )
-                #         breakpoint()
-                #         log.write(f'{args.beta0},{args.beta1},{args.tstop},{args.replicas},{epoch},{mean_gs},{std_gs}\n')
-                #         log.flush()
-                if args.size >= J.shape[0] or args.blocks > 1:
-                    x, samples, mean_gs, std_gs = simulate_full_im(
-                        h=h,
-                        J=J,
-                        beta0=beta0,
-                        beta1=beta1,
-                        tstop=args.tstop,
-                        replicas=args.replicas,
-                        epoch=args.epoch,
-                        dt=args.dt,
-                        scale=args.scale
-                    )
-                else:
-                    x, samples, mean_gs, std_gs = simulate_concurrent_im(
-                        h=h,
-                        J=J,
-                        beta0=beta0,
-                        beta1=beta1,
-                        tstop=args.tstop,
-                        replicas=args.replicas,
-                        epoch=args.epoch,
-                        dt=args.dt,
-                        nblocks=args.blocks,
-                        size=args.size,
-                        scale=args.scale
-                    )
-                for xi in x.T:
-                    log.write(f'{args.beta0},{args.beta1},{args.tstop},{args.epoch},{beta0},{beta1},{mean_gs},{std_gs},{":".join([str(i.item()) for i in xi.sign()])}\n')
-            #         log.flush()
-    pass
+    for blocks in args.blocks:
+        logfile = f'rng_tsp_block_{blocks}_log_2.csv'
+        with open(logfile, 'w') as log:
+            log.write(f'prob,blocks,tstop,beta0,beta1,epoch,epoch_real,syncs(MHz),beta0,beta1,mean_gs,std_gs,spin\n')
+            for graph in tqdm(args.graph):
+                try:
+                    cities, ind = map(int, re.findall(r'TSP_(\d+)_(\d+)\.ising', graph)[0])
+                except IndexError:
+                    continue
+                
+                if cities == 20:
+                    beta1 = 22
+                if cities == 25:
+                    beta1 = 28
+                if cities == 30:
+                    beta1 = 37
+                if cities == 35:
+                    beta1 = 46
+                
+                # print()
+                if ind >= 20:
+                    continue
+                h, J, const = read_ising(graph, args.scale)
+                # print(J.mean(), J.)
+                # args.scale 
+                for syncs in tqdm(np.logspace(3, 0, 40, base=10)):
+                    epoch_real = 1 / (syncs * 1e6)
+                    epoch = epoch_real / (50e-15 * 31e4)
+                    log.flush()
+                    if (args.size is not None and args.size < J.shape[0]) or blocks > 1:
+                        x, samples, mean_gs, std_gs = simulate_concurrent_im(
+                            h=h,
+                            J=J,
+                            beta0=args.beta0,
+                            beta1=beta1,
+                            tstop=args.tstop,
+                            replicas=args.replicas,
+                            epoch=epoch,
+                            dt=args.dt,
+                            nblocks=blocks,
+                            size=args.size,
+                            scale=args.scale
+                        )
+                    else:
+                        x, samples, mean_gs, std_gs = simulate_full_im(
+                            h=h,
+                            J=J,
+                            beta0=args.beta0,
+                            beta1=beta1,
+                            tstop=args.tstop,
+                            replicas=args.replicas,
+                            epoch=epoch,
+                            dt=args.dt,
+                            scale=args.scale
+                        )
+                        
+                    for xi in x.T:
+                        log.write(f'{graph},{blocks},{args.tstop},{epoch},{epoch_real},{syncs},{args.beta0},{beta1},{mean_gs},{std_gs},{":".join([str(i.item()) for i in xi.sign()])}\n')
