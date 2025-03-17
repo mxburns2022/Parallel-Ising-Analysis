@@ -208,6 +208,21 @@ function get_empirical_distribution(samples)
     return distribution
 end
 
+function get_empirical_distribution(samples, sample_map)
+    samplecount = size(samples)[1]
+    N, reps = size(samples[1])
+    nsamples = samplecount * reps
+    distribution = fill(0.0, len(sample_map))
+    increment = 1.0 / nsamples
+    for i in 1:samplecount
+        for rep in 1:reps
+            bitvec = (samples[i][:, rep] .> 0)
+            distribution[sample_map[bitvec]] += increment
+        end
+    end
+    return distribution
+end
+
 function get_gibbs_distribution(prob::SpinGlassProblem)
     distribution = fill(0.0, 2^prob.N)
     for i in 1:2^prob.N
@@ -218,11 +233,11 @@ function get_gibbs_distribution(prob::SpinGlassProblem)
     end
     distribution /= sum(distribution)
     return distribution
-
 end
+
 localARGS = isdefined(Main, :newARGS) ? newARGS : ARGS
 for blocks in [2, 3, 4, 6]
-    for epoch in 10.0.^(range(-10,stop=-7,length=30))
+    for epoch in 10.0.^(range(-10,stop=-6,length=40))
     # epoch = 1e-7
         par = Params(3000, blocks, epoch, epoch, 10.0)
         # if !isdefined(Main, :ideal) || (isdefined(Main, :repeat) && repeat)
@@ -240,5 +255,7 @@ for blocks in [2, 3, 4, 6]
         println("$(blocks),$(epoch),$(w1_νη),$(w1_νμ),$(w1_μη),$(err[1]),$(diff[1])")
     end
 end
+
+
 # M = compute_distance_matrix(prob.N)
 # dist = emd2(μ, ν, hamming_distance, max_iter=10_000_000, rtol=1e-6)
