@@ -6,8 +6,8 @@ using LinearAlgebra
 using DelimitedFiles
 # using DifferentialEquations, ProgressLogging
 using Statistics
-# using Clp
-# using PythonOT
+using Clp
+using PythonOT
 
 
 mutable struct Params
@@ -25,7 +25,7 @@ mutable struct Params
            tstop::Float64 = 1e-6,
            epoch::Float64 = 1e-9,
            beta::Float64 = 1.0)
-        return new(1e-12, size, replicas, [epoch], [beta], tstop, 310e3, 50e-15)
+        return new(8e-13, size, replicas, [epoch], [beta], tstop, 310e3, 50e-15)
     end
 end
 
@@ -158,7 +158,7 @@ function run_brim(prob::SpinGlassProblem, par::Params)
         copy!(x0, x)
         copy!(xideal, x)
         τ = 0
-        β0 = 0.5
+        β0 = par.beta[1]
         β1 = par.beta[1]
         βStep = (β1 - β0) / (ceil(par.epoch[1] / par.dt))
         β = β0
@@ -190,9 +190,8 @@ function run_brim(prob::SpinGlassProblem, par::Params)
     return (samples_ideal, samples_concurrent, grad_error, grad_difference)
 end
 
-function run_serial_brim(prob::SpinGlassProblem, par::Params)
+function run_serial_brim(prob::SpinGlassProblem, par::Params, x::Matrix{Float64})
     t = 0.0
-    x = sign.(randn(prob.N, par.replicas))
     samples_serial = []
     blocks = make_serial_block(prob.N, par)
     β0 = 0.5
@@ -207,16 +206,16 @@ function run_serial_brim(prob::SpinGlassProblem, par::Params)
             while τ < par.epoch[1]
                 gradient = (JSub * x[b,:] + hSub) / (par.R * par.C) .* par.dt
                 noise = sqrt(2 * par.dt/(β * par.R * par.C)) .* randn(size(x[b,:]))
-                x[b] += gradient + noise
+                x[b,:] += gradient + noise
                 x = max.(min.(x, 1.0), -1.0)
                 τ += par.dt
                 t += par.dt
             end
-            push!(samples_serial, x)
         end
+        # push!(samples_serial, x)
         β += βStep
     end
-    return samples_serial
+    return samples_serial, x
 end
     
 
@@ -310,27 +309,35 @@ end
 
 
 # Test the serial distribution
-# localARGS = isdefined(Main, :newARGS) ? newARGS : ARGS
-# for blocks in [2, 3, 4, 6]
-#     for epoch in 10.0.^(range(-10,stop=-6,length=40))
-#     # epoch = 1e-7
-#         par = Params(1, blocks, epoch, epoch, 10.0)
+localARGS = isdefined(Main, :newARGS) ? newARGS : ARGS
+
+for blocks in [3,6]
+
+    for epoch in 10.0.^[-10, -9, -8]
+
+    # epoch = 1e-7
+        par = Params(1 << 13, blocks, 1e-8, epoch, 12.)
+        prob = read_gset(localARGS[1], par)
+        x = sign.(randn(prob.N, par.replicas))
+        for iter in 1:50
+            # if !isdefined(Main, :ideal) || (isdefined(Main, :repeat) && repeat)
+            serial, x = run_serial_brim(prob, par, x)
+            repeat = false;
+            # println(serial[end])
+            # end
+            μ = get_empirical_distribution([x])
+            η = get_gibbs_distribution(prob)
+            C = compute_distance_matrix(prob.N)
+            w1_μη = emd2(μ, η, C)
+            println("$(blocks),$(iter * par.tstop),$(epoch),$(w1_μη)")
+            flush(stdout)
+        end
+        
+    end
+end
+# par = Params(1, 4, 1e-6, 1e-12, 5.0)
 #         # if !isdefined(Main, :ideal) || (isdefined(Main, :repeat) && repeat)
-#         prob = read_gset(localARGS[1], par)
-#         serial = run_serial_brim(prob, par)
-#         repeat = false;
-#         println(serial[end])
-#         # end
-#         μ = get_empirical_distribution(serial)
-#         η = get_gibbs_distribution(prob)
-#         C = compute_distance_matrix(prob.N)
-#         # w1_μη = emd2(μ, η, C)
-#         # println("$(blocks),$(epoch),$(w1_μη)")
-#     end
-# end
-par = Params(1, 4, 1e-6, 1e-12, 5.0)
-        # if !isdefined(Main, :ideal) || (isdefined(Main, :repeat) && repeat)
-prob = read_gset(localARGS[1], par)
-serial = run_serial_brim(prob, par)
-repeat = false;
-println(serial[end])
+# prob = read_gset(localARGS[1], par)
+# serial = run_serial_brim(prob, par)
+# repeat = false;
+# println(serial[end])
