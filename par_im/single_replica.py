@@ -7,7 +7,7 @@ import re
 from argparse import ArgumentParser
 from tqdm import tqdm
 from pathlib import Path
-from concurrent_im import get_blocks, energy, read_ising
+from par_im.multi_replica import get_blocks, energy, read_ising
 
 device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 
@@ -47,17 +47,9 @@ def simulate_concurrent_kuramoto(J: torch.Tensor,
     sync_steps = int(np.ceil(epoch / dt))
     beta_steps = np.sqrt(dt)*np.linspace(scale0, scale1, nsteps)
     burn_in_steps = int(np.ceil(burn_in_time / dt))
-    sample_steps = nsteps
-    if samples > 0:
-        sample_steps = int(np.floor((nsteps-burn_in_steps) / samples))
-    sampleset = np.zeros((samples, N))
-    samplecount = 0
     sumW = -J.sum()/2 * scale
     h.squeeze_().unsqueeze_(-1)
     for i in tqdm(range(nsteps), disable=True):
-        # if samples > 0 and i >= burn_in_steps and i % sample_steps == 0:
-        #     sampleset[(i-burn_in_steps) % sample_steps] = x.cpu().numpy()
-        #     samplecount += 1
         if ((i % sync_steps) == 0):
             x_old = x.clone().detach()
             if bits > 0:
@@ -77,71 +69,7 @@ def simulate_concurrent_kuramoto(J: torch.Tensor,
 
         gradient = gradient_int + gradient_ext - ((i % sync_steps) / sync_steps) * (2 * x).sin()
         x.add_(gradient, alpha=dt).add_(h, alpha=dt).add_(torch.randn_like(x), alpha=beta_steps[i])
-        # if i % 10000 == 0:
-        # if i % 1000 == 0:
-        #     print((-ene_single(phasev(x), h, J) + sumW)/2)
-        #     print(energy(x.sign(), h, J, scale, 0.0)/N)
-        # print(ene_single(phasev(x), h, J))
     ene = (-ene_single(phasev(x), h, J) + sumW)/2
-    # enevals = energy(phasev(x).unsqueeze(-1), h.unsqueeze(-1), J, scale, 0.0)/N
-    return x, ene
-
-def simulate_concurrent_brim(J: torch.Tensor, 
-                           h: torch.Tensor, 
-                           scale0: float, 
-                           scale1: float, 
-                           tstop: float, 
-                           dt: float,
-                           epoch: float, 
-                           samples: int = 0,
-                           burn_in_time: int = 0,
-                           nblocks: int = None, 
-                           scale: float = 1,
-                           size: int = None,
-                           replicas: int = 1,
-                           bits: int = 1):
-    N = J.shape[0]
-    blocks = get_blocks(N=N, nblocks=nblocks, maxsize=size)
-    blocklist = [J[np.ix_(i, i)] for i in blocks]
-    JInt: torch.Tensor = torch.block_diag(*blocklist)
-    JExt = J - JInt
-    x = torch.rand((N, replicas), device=device) * 2 - 1
-    nsteps = int(np.ceil(tstop / dt))
-    sync_steps = int(np.ceil(epoch / dt))
-    beta_steps = np.sqrt(dt)*np.linspace(scale0, scale1, nsteps)
-    burn_in_steps = int(np.ceil(burn_in_time / dt))
-    sample_steps = nsteps
-    if samples > 0:
-        sample_steps = int(np.floor((nsteps-burn_in_steps) / samples))
-    sampleset = np.zeros((samples, N))
-    samplecount = 0
-    sumW = -J.sum()/2 * scale
-    # breakpoint()
-    h.squeeze_().unsqueeze_(-1)
-    # x = torch.ones_like(x)
-    for i in tqdm(range(nsteps), disable=True):
-        # if samples > 0 and i >= burn_in_steps and i % sample_steps == 0:
-        #     sampleset[(i-burn_in_steps) % sample_steps] = x.cpu().numpy()
-        #     samplecount += 1
-        if i % sync_steps == 0:
-            if bits > 1:
-                step = 1 / (1 << (bits-1))
-                x_old = torch.ceil(x.abs() / step) * step * x.sign()
-            elif bits == 1:
-                x_old = x.sign()
-            else:
-                x_old = x.clone().detach()
-
-        
-        gradient_int = JInt.matmul(x)
-        gradient_ext = JExt.matmul(x_old)
-        gradient = gradient_int + gradient_ext
-        x.add_(gradient, alpha=dt).add_(h, alpha=dt).add_(torch.randn_like(x), alpha=beta_steps[i]).clip_(-1, 1)
-        # if i % 1000 == 0:
-        #     print((-ene_single(torch.sign(x), h, J) + sumW)/2)
-        # print(ene_single(phasev(x), h, J))
-    ene = (-ene_single(torch.sign(x), h, J) + sumW)/2
-    # enevals = energy(phasev(x).unsqueeze(-1), h.unsqueeze(-1), J, scale, 0.0)/N
     return x, ene
 
 def simulate_kuramoto(J: torch.Tensor, 
@@ -163,10 +91,8 @@ def simulate_kuramoto(J: torch.Tensor,
         x.add_(gradient, alpha=dt).add_(h, alpha=dt).add_(torch.randn_like(x), alpha=beta_steps[i])
         if i % 1000 == 0:
             print((-ene_single(torch.sign(x), h, J) + sumW)/2)
-            # print(ene_single(phasev(x), h, J))
     x = phasev(x)
     ene = ene_single(x, h, J)
-    # enevals = energy(phasev(x).unsqueeze(-1), h.unsqueeze(-1), J, scale, 0.0)/N
     return x, ene
 
 

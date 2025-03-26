@@ -263,7 +263,6 @@ for blocks in [2, 3, 4, 6]
     for epoch in 10.0.^(range(-10,stop=-6,length=40))
     # epoch = 1e-7
         par = Params(3000, blocks, epoch, epoch, 10.0)
-        # if !isdefined(Main, :ideal) || (isdefined(Main, :repeat) && repeat)
         prob = read_gset(localARGS[1], par)
         ideal, conc, err, diff = run_brim(prob, par)
         repeat = false;
