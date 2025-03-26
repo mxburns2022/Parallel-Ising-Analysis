@@ -207,16 +207,7 @@ if __name__ == '__main__':
             epoch = 1 / (31e4 * 50e-15 * bandwidth) * J.shape[0] / (2 << 30)
             for blocks in tqdm([1, 2, 4]):
                 for k in [10]:
-                    # for trials in range(10):
                     _, ene_km = simulate_concurrent_kuramoto(J=J, h=h, scale0=2.0, scale1=0.0, tstop=args.tstop, dt=args.dt, epoch=epoch, nblocks=blocks, scale=1, replicas=20, bits=bits, k=k)
-                    # for ebrimval in ene_brim:
-                    #     data['graph'].append(g)
-                    #     data['blocks'].append(blocks)
-                    #     data['epoch'].append(epoch)
-                    #     data['bandwidth'].append(bandwidth)
-                    #     data['cut'].append(ebrimval.item())
-                    #     data['solver'].append('brim')
-                    #     data['bits'].append(bits)
                     for ekmval in ene_km:
                         data['graph'].append(g)
                         data['blocks'].append(blocks)
